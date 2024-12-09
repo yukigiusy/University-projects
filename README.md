@@ -1,7 +1,7 @@
 # UNIVERSITY PROJECTS 🚀📊
 ## **List Project Overview**
 
-- Upside and Downside beta done on Python;
+- Upside and Downside beta done on [Python](https://github.com/yukigiusy/University-projects/blob/main/Upside_and_downside_beta.ipynb);
 - Advanced statistics project done alone: application of the statistical models done during the Advanced statistics course. The tasks were elaborated by the professor.
 - Black-Scholes model: paper + an implementation on Python; [work in progress]
 - Time series modelling : application on R of the AR and MA model.[work in progress]
