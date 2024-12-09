@@ -1,26 +1,10 @@
-# Upside and Downside Beta Analysis 🚀📊
+# UNIVERSITY PROJECTS 🚀📊
+## **List Project Overview**
 
-## Table of Contents
-- [Project Overview](#project-overview)
-- [Contents](#contents)
-- [Contact](#contact)
-
-
-## **Project Overview**
-
-Upside and downside beta measure a stock's sensitivity to market movements in different conditions:
-- **Upside Beta:** Sensitivity during market upturns.
-- **Downside Beta:** Sensitivity during market downturns.
-
----
-
-## **Contents**
-
-1. What is beta?;
-2. Upside and Downside beta;
-3. Mathematical computation;
-3. Let's work on Python;
-4. Cases of study.
+- Upside and Downside beta done on Python;
+- Advanced statistics project done alone: application of the statistical models done during the Advanced statistics course. The tasks were elaborated by the professor.
+- Black-Scholes model: paper + an implementation on Python; [work in progress]
+- Time series modelling : application on R of the AR and MA model.[work in progress]
 
 ---
 
