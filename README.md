@@ -5,7 +5,7 @@
 - Advanced statistics [project]([url](https://github.com/yukigiusy/University-projects/blob/main/Advanced_statistics%20(1).pdf)): application of the statistical models done during the Advanced statistics course. The tasks were elaborated by the professor.
 - Black-Scholes model: paper + an implementation on Python; [work in progress]
 - Time series modelling : application on R of the AR and MA model.[work in progress]
-- Time series modelling: application on R of the GARCH and apARCH through ACI and agACI
+- Time series modelling: application on R of the GARCH and apARCH through [ACI](OREFICE-CAMPANELLA.pdf) and agACI. For this there are both pdf and the rmd code.
 
 ---
 
