@@ -1,0 +1,304 @@
+---
+title: "TASK 2"
+author: "Giuseppina Orefice, Alessandra Campanella"
+date: "2025-01-12"
+output: html_document
+---
+
+# **PART II**
+
+**a) AgACI paper**
+
+The AgACI (Adaptive Aggregated Conformal Inference) extends the ACI method (Adaptive Conformal Inference) by selecting an appropriate adaptation rate $\gamma$ .
+
+The AgACI method combines the predictions from multiple ACI experts, each with different $\gamma_k$ using an aggregation strategy, this creates a parameter-free,adaptive method suitable for non-exchangeable data.
+
+We use the AgACI method because the ACI requires a manual tuning of $\gamma$ and this does not gives us optimal results because the time series change making a single $\gamma$ inadequate.
+
+With the AgACI multiple experts are introduced, each one corresponds to a different $\gamma_k$ and combines their prediction dynamically.
+By aggregating experts outputs this method eliminates the need for manual tuning and ensures the robustness to time series changes.
+
+Each expert k runs an ACI procedure with a specific $\gamma_k$ chosen form a predefined set $[\gamma_1, \gamma_2, ..., \gamma_k]$ .
+Then AgACI assigns dynamic weights to experts based on their past performance, these weights determine the contribution of each expert to the final prediction interval.
+Aggregated prediction intervals are typically smaller and more adaptive, maintaining the desired coverage rate $(1-\alpha)$ over time.
+
+To initialize the AgACI we have to define a set of K learning rates $(\gamma_k)$ and after that initialize the weights $\omega_k(0)=\frac{1}{K}$ for each expert.
+Two strategies are proposed based on running ACI for K values, but we are going to focus on the Online Expert Aggregation strategy.
+This strategy introduce an adaptive aggregation of experts with experts k being ACI with parameters $\gamma_k$ , then at each time step t, two independent aggregation intervals are computed:
+
+$$
+\hat{C}_{\alpha k,t}=[\hat{b}^{(l)}_{k,t},\hat{b}^{(u)}_{k,t}] 
+$$
+
+$$
+\bar{C}_t=[\bar{b}^{(l)}_t,\bar{b}^{(u)}_t]
+$$
+
+one for each lower and upper bounds.
+
+This strategy requires a miscoverage error rate $\alpha$ , a grid of values $\gamma$, an *aggregation rule* $\phi$ and some threshold values $M(l)$ and $M(u)$ .
+
+Then for every time step t we compute the forecasts using the ACI with every value of $\gamma$ inside the grid.
+If one of these forecasts is outside the bounds, then it is replaced with the corresponding threshold value.
+
+After this the weight for every expert are computed based on losses incurred up to time t: $\omega_{t,k}=\phi (\rho_{\beta(.)}(y_s,\hat{b}_{s,l}(x_s)), s ∈ [T_0+1,t], l∈ [1,K]$
+
+In this case we use the pinball loss $\rho_\beta$ , that is common in quantile regression that $\beta$ is to be chosen between $\alpha /2$ and $1-\alpha /2$ for lower an upper bound $\beta(l)$ and $\beta(u)$ respectively.
+
+The aggregate forecast is calculated as an optimal weighted mean of the experts' forecasts
+
+$$
+\bar{b}_{t+1}(x)=\frac{\sum^K_{k=1}\omega_{t,k}\hat{b}_{t+1,k}(x)}{\sum^K_{l=1}\omega_{t,l}}
+$$
+
+where the weights assigned to the experts are computed as above.
+To conclude, the final forecast for each time step is given by aggregating the experts' forecasts.
+
+**b) Using the same financial asset chosen in Part I, apply AgACI to quantify the prediction uncertainty of its volatility and evaluate its coverage over time.**
+
+## point 2.2 and 2.3 
+Now, it is time to apply the agACI to our model of before.
+We have chosen to apply it to the apARCH case because: - it was the one that has performed well among the other models; - the paper's author have chosen a quantile regression, but from the theory we know that when we work with the returns we need to model the conditional heteroscedasticity.
+In effect the GARCH model and its variants are able to model the conditional heteroscedasticity and they can be well applied to the case of the returns of the stocks.
+We have already explained that there is the clustering of the volatility for the returns and the quantile regression cannot capture at all this kind of behavior.
+It is useful for estimating conditional quantiles (like value-at-risk), it does not model the changing volatility of the residuals over time.
+This is a crucial aspect when dealing with financial time series, where understanding and forecasting volatility is key for risk management and asset pricing.
+In addition, thanks to the GARCH variants like apARCH we are able to achieve more the fact that negative shocks often cause greater volatility than positive shocks of the same magnitude.
+This flexibility in modeling asymmetric effects is something that quantile regression does not offer in the same way.
+Even though the GARCH can have some drawbacks, it is still able to model that specific pattern of the returns and that's why our choice is the **GARCH**.
+We have modified a bit the `garchConformalForecasting` above in order to apply the aggregation function and then the agACI.
+There are comments inside the box.
+```{r}
+library(rugarch)
+library(quantmod)
+library(quantreg)
+library(zoo)
+library(dplyr)
+library(opera)
+getSymbols("AMZN", from = "2016-12-31", to = "2024-12-31")
+prices=Cl(AMZN)
+returns=diff(log(prices))
+returns=na.omit(returns)
+
+tab_gamma_1 = c(0.0004, 0.023)
+train_size <- floor(length(returns) * 0.5)  
+test_size <- length(returns) - train_size
+train_data <- returns[1:train_size]
+test_data <- returns[(train_size + 1):length(returns)]
+
+garchConformalForecasting_agg <- function(
+    returns,
+    alpha = 0.10,
+    gamma = 0.001,
+    lookback = 1250,
+    garchP = 1,
+    garchQ = 1,
+    startUp = 100,
+    verbose = FALSE,
+    updateMethod = "Momentum",
+    momentumBW = 0.95,
+    scoreType = "normalized", # Options: "normalized", "non-normalized"
+    modelType = "sGARCH",     # Options: "sGARCH", "apARCH"
+    forecastSteps = 1,        # Number of forecasting steps ahead
+    agg_model = "BOA",        # Aggregation model for weights
+    tab_gamma = c(0.0004, 0.023) # Gamma values for the mixture function
+) {
+  myT <- length(returns)
+  T0 <- max(startUp, lookback)
+  
+  # Specify GARCH model based on user input
+  garchSpec <- ugarchspec(
+    mean.model = list(armaOrder = c(0, 0), include.mean = FALSE),
+    variance.model = list(model = modelType, garchOrder = c(garchP, garchQ)),
+    distribution.model = "norm"
+  )
+  
+  alphat <- alpha
+  
+  # Initialize data storage variables
+  errSeqOC <- rep(0, myT - T0 + 1)
+  errSeqNC <- rep(0, myT - T0 + 1)
+  alphaSequence <- rep(alpha, myT - T0 + 1)
+  scores <- rep(0, myT - T0 + 1)
+  low_PI <- rep(0, myT - T0 + 1)
+  high_PI <- rep(0, myT - T0 + 1)
+  experts_low <- array(NA, dim = c(length(tab_gamma), forecastSteps, test_size))
+  experts_high <- array(NA, dim = c(length(tab_gamma), forecastSteps, test_size))
+  
+  for (t in T0:myT) {
+    if (verbose) {
+      print(t)
+    }
+    
+    # Fit GARCH model
+    garchFit <- ugarchfit(garchSpec, returns[(t - lookback + 1):(t - 1)], solver = "hybrid")
+    garchForecast <- ugarchforecast(garchFit, n.ahead = forecastSteps)
+    sigmaNext <- sigma(garchForecast)
+    
+    # Compute scores based on score type
+    for(i in 1:forecastSteps){
+      if (scoreType == "normalized") {
+        scores[t - T0 + 1] <- abs(returns[t]^2 - sigmaNext[i]^2) / sigmaNext[i]^2
+      } else if (scoreType == "non-normalized") {
+        scores[t - T0 + 1] <- abs(returns[t]^2 - sigmaNext[i]^2)
+      }
+    }
+    
+    recentScores <- scores[max(t - T0 + 1 - lookback + 1, 1):(t - T0)]
+    
+    # Compute errors for both methods
+    errSeqOC[t - T0 + 1] <- as.numeric(scores[t - T0 + 1] > quantile(recentScores, 1 - alphat))
+    sorted= sort(scores) 
+    quantile_c= sorted[ceiling((1-alphat)* length(sorted+1))]
+    
+    # Update alphat
+    alphaSequence[t - T0 + 1] <- alphat
+    if (updateMethod == "Simple") {
+      alphat <- alphat + gamma * (alpha - errSeqOC[t - T0 + 1])
+      alphat <- max(0, min(1, alphat))
+    } else if (updateMethod == "Momentum") {
+      w <- rev(momentumBW^(1:(t - T0 + 1)))
+      w <- w / sum(w)
+      alphat <- alphat + gamma * (alpha - sum(errSeqOC[1:(t - T0 + 1)] * w))
+      alphat <- max(0, min(1, alphat))
+    }
+    
+    # Calculate prediction intervals (PI)
+    if (scoreType == "non-normalized") {
+      low_PI[t - T0 + 1] <- sigmaNext^2 - quantile_c
+      high_PI[t - T0 + 1] <- sigmaNext^2 + quantile_c
+    } else if (scoreType == "normalized") {
+      low_PI[t - T0 + 1] <- sigmaNext^2 - quantile_c * sigmaNext^2
+      high_PI[t - T0 + 1] <- sigmaNext^2 + quantile_c * sigmaNext^2
+    }
+    
+    if (t %% 100 == 0) {
+      print(sprintf("Done %g steps", t))
+    }
+  }
+  # Let's to create the experts
+  for (idm in seq_along(tab_gamma)) {
+    gamma2 <- tab_gamma[idm]  
+    scale <- sqrt(gamma2)     # We are going to scale the value of gamma
+   #in this way we can obtain different predictions for the lower and upper bounds (experts_low and experts_high), effectively controlling the range of the prediction intervals. We can create a set of predictions that span different possible levels of volatility. 
+    # Compute lower and upper bounds
+    experts_low[idm, , ] <- -scale * sigmaNext  
+    experts_high[idm, , ] <- scale * sigmaNext 
+  }
+   
+  
+  # The lower bounds are aggregated by using the method mixture; we have chosen the pinball loss to penalize the errors and BOA as aggregation function
+  #, which combines these different experts' outputs.
+  #After computing predictions from different experts, the mixture function is used to aggregate predictions for the lower (mlpol_grad_low) and upper (mlpol_grad_high) bounds of the volatility forecast.
+  mlpol_grad_low <- mixture(
+    Y = as.numeric(test_data),  
+    experts = aperm(experts_low),   
+    model = "BOA",              
+    loss.gradient = TRUE,       
+    loss.type = list(name = "pinball", tau = 0.05)  
+  )
+  
+  
+  mlpol_grad_high <- mixture(
+    Y = as.numeric(test_data),  
+    experts = aperm(experts_high),  
+    model = "BOA",              
+    loss.gradient = TRUE,       
+    loss.type = list(name = "pinball", tau = 0.95)  
+  )
+  
+  # Aggregated Predictions
+  aggregated_low <- mlpol_grad_low$prediction
+  aggregated_high <- mlpol_grad_high$prediction
+
+  
+  return(list('Y_inf' = aggregated_low, 'Y_sup' = aggregated_high, 'weights_low' = mlpol_grad_low$weights, 'weights_high' = mlpol_grad_high$weights,
+              alphaSequence = alphaSequence, errSeqOC = errSeqOC, sigmaNext=sigmaNext, low_PI = low_PI, high_PI = high_PI, scores=scores, garchForecast=garchForecast))
+}
+
+```
+During the optimization process, the mixture() function computes the weights that correspond to the importance or contribution of each expert to the final aggregated prediction. These weights are returned as part of the output of the mixture() function.
+Each prediction was created by using the pinball as measure of accuracy.
+We have chosen the pinball measure because our primal aim is the identification of a prediction interval and it is a very good measure of the accuracy of the quantile prediction.
+But we have seen that another good measure can be the log-likelihood loss, that basically is a measure of the accuracy and the efficiency of the entire forecasting.
+The first application of the function is the GARCH norm.
+
+```{r, warning=FALSE}
+garch_norm_tab1= garchConformalForecasting_agg(
+      returns = returns,  
+      alpha = 0.10,     
+      gamma = tab_gamma_1,     
+      modelType = "sGARCH",   
+      scoreType = "normalized",  
+      garchP = 1, garchQ = 1,   
+      startUp = 100,            
+      verbose = TRUE,           
+      updateMethod = "Simple",  
+      momentumBW = 0.95,        
+      forecastSteps = 5,             
+      agg_model = "BOA",
+      tab_gamma=tab_gamma_1
+    )
+```
+
+```{r, warning=FALSE}
+tab_gamma_2=c(0.01, 0.088, 0.0093, 0.01)
+garch_norm_tab2= garchConformalForecasting_agg(
+      returns = returns,  
+      alpha = 0.10,     
+      gamma = tab_gamma_2,     
+      modelType = "sGARCH",   
+      scoreType = "normalized",  
+      garchP = 1, garchQ = 1,   
+      startUp = 100,            
+      verbose = TRUE,           
+      updateMethod = "Simple",  
+      momentumBW = 0.95,        
+      forecastSteps = 5,             
+      agg_model = "BOA",
+      tab_gamma=tab_gamma_2
+    )
+```
+
+As aggregation model we have chosen **BOA (Bernstein Online Aggregation)**.
+The BOA algorithm often achieves better generalization performance compared to individual models due to its iterative correction of errors, which helps reduce bias and variance in predictions.
+It means that it handles overfitting and underfitting adjusting the weights dynamically and automatically.
+In addition, the BOA is robust to the change in distribution that occurs frequently in this framework, but it is very expensive.
+Other models are **exponentially weighted average** and the **online gradient descent**.They are both flexible and not expensive, but the first one, the EWA can give more weight to the recent observations with the respect the past observations.
+This could be also reasonable, because we care a lot of the recent observations and not the far observations!
+The main drawback is the overfitting and in addition the estimation of the learning rate: if the learning rate is too high, it could lead to instability in predictions, which might be problematic for the highly volatile nature of financial data in GARCH models.
+The OGD can dynamically adjust the learning rate and is suited for problems with continuous updates.
+It could adapt well to the time-varying nature of volatility and is robust to changes in the input data, but also in this case the hyperparameter tuning is expensive and we should pay attention to the calibration that we are going to make.
+Let's plot the coverage rate through time and comparing it with the apARCH
+```{r}
+calculateLocalCoverage <- function(errSeqOC, windowSize = 250) {
+  n <- length(errSeqOC)
+  localCoverage <- numeric(n)
+  
+  for (t in seq(windowSize, n)) {
+    localCoverage[t] <- 1 - sum(errSeqOC[(t - windowSize + 1):t]) / windowSize
+  }
+  
+  return(localCoverage)
+}
+# Apply the function
+localCovt_garch_norm_tab1 <- calculateLocalCoverage(garch_norm_tab1$errSeqOC, windowSize = 250)
+localCovt_garch_norm_tab2 <- calculateLocalCoverage(garch_norm_tab2$errSeqOC, windowSize = 250)
+target_value= 1-0.10
+
+# Plot the results (optional)
+plot(localCovt_garch_norm_tab1, col = "brown", type = "l", 
+     main = "Local Coverage Frequency Over Time", 
+     xlab = "Time", ylab = "Local Coverage Frequency", 
+     lwd = 2, xlim = c(251, length(garch_norm_tab1$errSeqOC)))
+lines(localCovt_garch_norm_tab2, col = "lightblue", lwd = 2)
+abline(h = target_value, col = "black", lty = 2, lwd = 2)
+legend("bottomright", 
+       legend = c("first grid", "second grid"),
+       col = c("brown", "lightblue","magenta"),
+       lwd = c(2, 2), lty = c(1, 1))
+
+```
+As we can see from the local coverage plot, the agACI, when applied with both the grid of the K experts, demonstrates a significantly overcoverage over time compared to the ACI technique applied to the apARCH model, using the best gamma value calculated earlier. 
+It basically means that agACI tends to overestimate the interval and it is not so much resilient to fluctuations in the market data. By aggregating the predictions from multiple experts with varying volatility assumptions, the agACI method maybe offers a more reliable and robust forecast, but it does not improves so much the overall quality and precision of the prediction intervals in terms of coverage rate.
+Sharp deviations above or below 0.90 indicate periods where the coverage rate is significantly different from the target and in the plot above this happened all over the time.
